@@ -20,14 +20,14 @@ task pca_join_keeplist {
     chmod 750 ~{plink2_file}
     ~{plink2_file} \
             --memory ~{mem}000 --threads ~{threads} \
-            --bfile ./fc-secure-1d32bec3-a978-47ea-88a7-5c66e29fc355/AOU_GENOTYPES_PRUNED200kb03_MAF05_HWE_kfh_REGENIE_step1 \
+            --bfile ~{sub(bedfile, "\.bed$", "")} \ \
             --keep ~{pheno_file} \
             --mac 5 \
             --write-snplist \
             --out ~{outprefix}
     ~{plink2_file} \
             --memory ~{mem}000 --threads ~{threads} \
-            --bfile ./fc-secure-1d32bec3-a978-47ea-88a7-5c66e29fc355/AOU_GENOTYPES_PRUNED200kb03_MAF05_HWE_kfh_REGENIE_step1 \
+            --bfile ~{sub(bedfile, "\.bed$", "")} \ \
             --keep ~{pheno_file} \
             --maf 0.1 \
             --pca approx \
@@ -95,7 +95,7 @@ task step1 {
     find . -maxdepth 6 -type f
         regenie \
             --step 1 \
-            --bed ./fc-secure-1d32bec3-a978-47ea-88a7-5c66e29fc355/AOU_GENOTYPES_PRUNED200kb03_MAF05_HWE_kfh_REGENIE_step1 \
+            --bed ~{sub(bedfile, "\.bed$", "")} \
             --phenoFile ~{phenocovar_file} \
             --phenoColList ~{phenos} \
             --covarFile ~{phenocovar_file} \
