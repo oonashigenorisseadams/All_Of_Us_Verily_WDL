@@ -118,7 +118,8 @@ task step1 {
     docker: "ghcr.io/erkkuleo/regenie-nonlinear:sha-ce562ea"
     cpu: "~{cpu}"
     memory: "~{mem} GB"
-    disks: "local-disk 300 HDD"
+    disks: "local-disk 500 HDD"
+    maxRetries: 3
   }
 }
 
@@ -166,6 +167,7 @@ task step2 {
   regenie \
     --step 2 \
     --bgen ~{bgen} \
+    --ref-first \
     --sample ~{sample_file} \
     --phenoFile ~{phenocovar_file} \
     --phenoColList ~{phenos} \
