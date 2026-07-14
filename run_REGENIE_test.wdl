@@ -2,6 +2,7 @@ version 1.0
 
 task regenie_help_test {
   input {
+    File regenie_bin
     File bedfile
     File bimfile
     File famfile
@@ -11,7 +12,7 @@ task regenie_help_test {
     Int disk_gb
   }
 
-  command <<<
+  command <
     set -euo pipefail
 
     echo "=== Staged files ==="
@@ -24,10 +25,15 @@ task regenie_help_test {
     free -h
 
     echo "=== Input file sizes ==="
-    ls -lh ~{bedfile} ~{bimfile} ~{famfile} ~{phenocovar_file}
+    ls -lh ~{bedfile} ~{bimfile} ~{famfile} ~{phenocovar_file} ~{regenie_bin}
+
+    chmod 750 ~{regenie_bin}
+
+    echo "=== regenie version ==="
+    ~{regenie_bin} --version || echo "no --version output"
 
     echo "=== regenie help ==="
-    regenie --help
+    ~{regenie_bin} --help
   >>>
 
   output {
@@ -36,7 +42,7 @@ task regenie_help_test {
   }
 
   runtime {
-    docker: "ghcr.io/erkkuleo/regenie-nonlinear:sha-ce562ea"
+    docker: "ubuntu:22.04"
     cpu: "~{cpu}"
     memory: "~{mem} GB"
     disks: "local-disk ~{disk_gb} HDD"
@@ -45,6 +51,7 @@ task regenie_help_test {
 
 workflow test_regenie_localization {
   input {
+    File regenie_bin
     File bedfile
     File bimfile
     File famfile
@@ -56,6 +63,7 @@ workflow test_regenie_localization {
 
   call regenie_help_test {
     input:
+      regenie_bin = regenie_bin,
       bedfile = bedfile,
       bimfile = bimfile,
       famfile = famfile,
