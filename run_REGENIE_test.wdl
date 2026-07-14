@@ -13,28 +13,23 @@ task regenie_help_test {
   }
 
   command <<<
-    set -euo pipefail
+    set -uo pipefail
 
-    echo "=== Staged files ==="
-    find . -maxdepth 6 -type f
+    echo "=== Attempting apt-get install libgomp1 (30s/60s timeouts) ==="
+    timeout 30 apt-get update -qq
+    UPDATE_RC=$?
+    echo "apt-get update exit code: ${UPDATE_RC}"
 
-    echo "=== Disk usage ==="
-    df -h .
+    if [ "${UPDATE_RC}" -eq 0 ]; then
+      timeout 60 apt-get install -qq -y --no-install-recommends libgomp1
+      INSTALL_RC=$?
+      echo "apt-get install exit code: ${INSTALL_RC}"
+    else
+      echo "Skipping install since apt-get update failed/timed out."
+    fi
 
-    echo "=== Memory ==="
-    free -h
-
-    echo "=== bedfile ==="
-    ls -lh ~{bedfile}
-
-    echo "=== bimfile ==="
-    ls -lh ~{bimfile}
-
-    echo "=== famfile ==="
-    ls -lh ~{famfile}
-
-    echo "=== phenocovar_file ==="
-    ls -lh ~{phenocovar_file}
+    echo "=== Checking for libgomp.so.1 ==="
+    find / -name "libgomp.so*" 2>/dev/null || echo "libgomp.so not found anywhere"
 
     echo "=== regenie_bin ==="
     ls -lh ~{regenie_bin}
@@ -44,7 +39,7 @@ task regenie_help_test {
     ~{regenie_bin} --version || echo "no --version output"
 
     echo "=== regenie help ==="
-    ~{regenie_bin} --help
+    ~{regenie_bin} --help || echo "regenie --help failed, exit code $?"
   >>>
 
   output {
