@@ -12,7 +12,7 @@ task regenie_help_test {
     Int disk_gb
   }
 
-  command <
+  command <<<
     set -euo pipefail
 
     echo "=== Staged files ==="
@@ -24,9 +24,20 @@ task regenie_help_test {
     echo "=== Memory ==="
     free -h
 
-    echo "=== Input file sizes ==="
-    ls -lh ~{bedfile} ~{bimfile} ~{famfile} ~{phenocovar_file} ~{regenie_bin}
+    echo "=== bedfile ==="
+    ls -lh ~{bedfile}
 
+    echo "=== bimfile ==="
+    ls -lh ~{bimfile}
+
+    echo "=== famfile ==="
+    ls -lh ~{famfile}
+
+    echo "=== phenocovar_file ==="
+    ls -lh ~{phenocovar_file}
+
+    echo "=== regenie_bin ==="
+    ls -lh ~{regenie_bin}
     chmod 750 ~{regenie_bin}
 
     echo "=== regenie version ==="
