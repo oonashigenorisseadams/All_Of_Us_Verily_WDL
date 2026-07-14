@@ -20,14 +20,14 @@ task pca_join_keeplist {
     chmod 750 ~{plink2_file}
     ~{plink2_file} \
             --memory ~{mem}000 --threads ~{threads} \
-            --bfile ~{sub(bedfile, "\.bed$", "")} \ \
+            --bfile ~{sub(bedfile, "\.bed$", "")} \
             --keep ~{pheno_file} \
             --mac 5 \
             --write-snplist \
             --out ~{outprefix}
     ~{plink2_file} \
             --memory ~{mem}000 --threads ~{threads} \
-            --bfile ~{sub(bedfile, "\.bed$", "")} \ \
+            --bfile ~{sub(bedfile, "\.bed$", "")} \
             --keep ~{pheno_file} \
             --maf 0.1 \
             --pca approx \
