@@ -75,7 +75,7 @@ task pca_join_keeplist {
     docker: "ubuntu:22.04"
     cpu: "~{cpu}"
     memory: "~{mem} GB"
-    disks: "local-disk 300 HDD"
+    disks: "local-disk 300 SSD"
   }
 }
 
@@ -131,7 +131,7 @@ task step1 {
     docker: "gcc:12"
     cpu: "~{cpu}"
     memory: "~{mem} GB"
-    disks: "local-disk 300 HDD"
+    disks: "local-disk 300 SSD"
   }
 }
 
@@ -153,6 +153,9 @@ task step2 {
     Int cpu
     Int mem
   }
+  
+  Int input_size_gb = ceil(size(bgen, "GB") + size(locos, "GB") + size(pred, "GB") + size(sample_file, "GB") + size(phenocovar_file, "GB"))
+  Int disk_size_gb  = input_size_gb * 2 + 50
 
   command <<<
     set -euo pipefail
@@ -206,7 +209,7 @@ task step2 {
     docker: "gcc:12"
     cpu: "~{cpu}"
     memory: "~{mem} GB"
-    disks: "local-disk 400 HDD"
+    disks: "local-disk ~{disk_size_gb} SSD"
   }
 }
 
