@@ -92,6 +92,7 @@ task step1 {
     Int cpu
     Int mem
     Int threads
+    String? catCovarList
   }
 
   command <<<
@@ -113,6 +114,7 @@ task step1 {
       --phenoColList ~{phenos} \
       --covarFile ~{phenocovar_file} \
       --covarColList ~{covariates} \
+      ~{"--catCovarList " + catCovarList} \
       --bsize 1000 \
       --bt \
       --firth \
@@ -152,6 +154,7 @@ task step2 {
     Int threads
     Int cpu
     Int mem
+    String? catCovarList
   }
   
   Int input_size_gb = ceil(size(bgen, "GB") + size(locos, "GB") + size(pred, "GB") + size(sample_file, "GB") + size(phenocovar_file, "GB"))
@@ -190,6 +193,7 @@ task step2 {
       --phenoColList ~{phenos} \
       --covarFile ~{phenocovar_file} \
       --covarColList ~{covariates} \
+      ~{"--catCovarList " + catCovarList} \
       --pred ~{pred} \
       --bsize 400 \
       --bt \
@@ -240,6 +244,7 @@ workflow pca_then_regenie {
     Int cpu2
     Int mem2
     Int threads2
+    String? catCovarList
   }
 
   call pca_join_keeplist {
@@ -267,7 +272,8 @@ workflow pca_then_regenie {
       outprefix = outprefix_step1,
       cpu = cpu1,
       mem = mem1,
-      threads = threads1
+      threads = threads1,
+      catCovarList = catCovarList
   }
 
   scatter (i in range(length(bgen_files))) {
@@ -287,7 +293,8 @@ workflow pca_then_regenie {
         chr_name = chr_names[i],
         threads = threads2,
         cpu = cpu2,
-        mem = mem2
+        mem = mem2,
+        catCovarList = catCovarList
     }
   }
 }
