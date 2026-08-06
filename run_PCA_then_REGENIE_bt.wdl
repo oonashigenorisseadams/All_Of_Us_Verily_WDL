@@ -83,6 +83,7 @@ task step1 {
   input {
     File regenie_bin
     File phenocovar_file
+    File keeplist
     File bedfile
     File bimfile
     File famfile
@@ -106,10 +107,14 @@ task step1 {
     echo "regenie version check:"
     ~{regenie_bin} --version || true
 
+    echo "Applying variant keeplist (--extract): ~{keeplist}"
+    wc -l ~{keeplist}
+
     ~{regenie_bin} \
       --step 1 \
       --bed ~{sub(bedfile, "\.bed$", "")} \
       --ref-first \
+      --extract ~{keeplist} \
       --phenoFile ~{phenocovar_file} \
       --phenoColList ~{phenos} \
       --covarFile ~{phenocovar_file} \
@@ -264,6 +269,7 @@ workflow pca_then_regenie {
     input:
       regenie_bin = regenie_bin,
       phenocovar_file = pca_join_keeplist.phenocovar,
+      keeplist = pca_join_keeplist.keeplist,
       bedfile = bedfile,
       bimfile = bimfile,
       famfile = famfile,
