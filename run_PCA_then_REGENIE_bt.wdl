@@ -22,7 +22,7 @@ task pca_join_keeplist {
     chmod 750 ~{plink2_file}
 
     ~{plink2_file} \
-      --memory ~{mem}000 --threads ~{threads} \
+      --memory ~{mem * 900} --threads ~{threads} \
       --bfile ~{sub(bedfile, "\.bed$", "")} \
       --keep ~{pheno_file} \
       --mac 5 \
@@ -30,40 +30,53 @@ task pca_join_keeplist {
       --out ~{outprefix}
 
     ~{plink2_file} \
-      --memory ~{mem}000 --threads ~{threads} \
+      --memory ~{mem * 900} --threads ~{threads} \
       --bfile ~{sub(bedfile, "\.bed$", "")} \
       --keep ~{pheno_file} \
       --maf 0.1 \
       --pca approx \
       --out ~{outprefix}
 
-    sed -i 's/^#//g' ~{outprefix}.eigenvec
+    sed -i 's/^#//' ~{outprefix}.eigenvec
 
+    # Join PCs onto the pheno/covar file by IID (column found by header name).
+    # plink2 may omit the FID column from .eigenvec, so never join on FID+IID by position.
     awk 'BEGIN{FS=OFS="\t"}
     NR==FNR {
       if (FNR==1) {
+        for (i=1; i<=NF; i++) if ($i=="IID") pi=i
+        if (!pi) { print "ERROR: no IID column in pheno file header" > "/dev/stderr"; exit 1 }
         h1 = $0
         next
       }
-      key = $1 FS $2
-      a[key] = $0
+      a[$pi] = $0
       next
     }
     FNR==1 {
+      for (i=1; i<=NF; i++) {
+        if ($i=="IID") ei=i
+        else if ($i!="FID") pcs[++n]=i
+      }
+      if (!ei) { print "ERROR: no IID column in eigenvec header" > "/dev/stderr"; exit 1 }
       printf "%s", h1
-      for (i=3; i<=NF; i++) printf "%s%s", OFS, $i
+      for (k=1; k<=n; k++) printf "%s%s", OFS, $pcs[k]
       printf "\n"
       next
     }
-    {
-      key = $1 FS $2
-      if (key in a) {
-        printf "%s", a[key]
-        for (i=3; i<=NF; i++) printf "%s%s", OFS, $i
-        printf "\n"
-      }
+    ($ei in a) {
+      printf "%s", a[$ei]
+      for (k=1; k<=n; k++) printf "%s%s", OFS, $pcs[k]
+      printf "\n"
     }
     ' ~{pheno_file} ~{outprefix}.eigenvec > ~{outprefix}_phenocovar.tsv
+
+    # Fail loudly if the join matched nobody (header-only output)
+    nrows=$(( $(wc -l < ~{outprefix}_phenocovar.tsv) - 1 ))
+    echo "Samples in phenocovar after PC join: ${nrows}"
+    if [ "${nrows}" -lt 1 ]; then
+      echo "ERROR: PC join produced no samples; check that pheno IIDs match the .fam IIDs" >&2
+      exit 1
+    fi
   >>>
 
   output {
@@ -122,8 +135,6 @@ task step1 {
       ~{"--catCovarList " + catCovarList} \
       --bsize 1000 \
       --bt \
-      --firth \
-      --approx \
       --lowmem \
       --threads ~{threads} \
       --out ~{outprefix}
@@ -189,6 +200,21 @@ task step2 {
     echo "LOCO symlinks in cwd:"
     ls -lh *.loco || true
 
+    # pred.list may hold step 1's absolute paths, which don't exist in this task.
+    # Rewrite each entry to point at the localized LOCO file in this working directory.
+    while read -r pheno_name loco_path; do
+      [ -z "${pheno_name}" ] && continue
+      local_loco="$(pwd)/$(basename "${loco_path}")"
+      if [ ! -e "${local_loco}" ]; then
+        echo "ERROR: LOCO file for ${pheno_name} not localized: $(basename "${loco_path}")" >&2
+        exit 1
+      fi
+      echo "${pheno_name} ${local_loco}"
+    done < ~{pred} > pred_local.list
+
+    echo "Rewritten pred list:"
+    cat pred_local.list
+
     ~{regenie_bin} \
       --step 2 \
       --bgen ~{bgen} \
@@ -199,7 +225,7 @@ task step2 {
       --covarFile ~{phenocovar_file} \
       --covarColList ~{covariates} \
       ~{"--catCovarList " + catCovarList} \
-      --pred ~{pred} \
+      --pred pred_local.list \
       --bsize 400 \
       --bt \
       --firth --approx --pThresh 0.01 \
