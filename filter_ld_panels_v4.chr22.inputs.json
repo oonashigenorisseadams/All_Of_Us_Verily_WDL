@@ -1,0 +1,26 @@
+{
+  "ld_panel_filter_v4.chroms": [
+    "22"
+  ],
+  "ld_panel_filter_v4.pgen_files": [
+    "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr22.pgen"
+  ],
+  "ld_panel_filter_v4.pvar_files": [
+    "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr22.pvar"
+  ],
+  "ld_panel_filter_v4.psam_files": [
+    "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/acaf_threshold/pgen/acaf_threshold.chr22.psam"
+  ],
+  "ld_panel_filter_v4.keep_files": [
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/oona/proj/aou_ld_panels_v9/keeps_anc_v3/anc_afr.keep",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/oona/proj/aou_ld_panels_v9/keeps_anc_v3/anc_amr.keep",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/oona/proj/aou_ld_panels_v9/keeps_anc_v3/anc_eas.keep",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/oona/proj/aou_ld_panels_v9/keeps_anc_v3/anc_eur_75k.keep",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/oona/proj/aou_ld_panels_v9/keeps_anc_v3/anc_mid.keep",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/oona/proj/aou_ld_panels_v9/keeps_anc_v3/anc_sas.keep"
+  ],
+  "ld_panel_filter_v4.plink2": "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/bin/plink2",
+  "ld_panel_filter_v4.snps_only": true,
+  "ld_panel_filter_v4.hwe": "1e-50 keep-fewhet",
+  "ld_panel_filter_v4.mac": 20
+}
