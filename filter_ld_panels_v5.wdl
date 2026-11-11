@@ -7,7 +7,7 @@ version 1.0
 ##     instead of being dropped by --max-alleles 2
 ##   * indels are kept (snps_only default false)
 ##   * split alleles are trimmed of bases shared at the end of REF and ALT (AT>TT -> A>T; POS unchanged)
-##   * every variant gets a unique ID CHROM:POS:REF:ALT; '*' alleles are removed; any remaining
+##   * every variant gets a unique ID chrN:POS:REF:ALT (--output-chr chrM keeps the 'chr' prefix); '*' alleles are removed; any remaining
 ##     duplicate IDs are removed (first kept) and counted
 ##   * filters (geno, hwe, mac) are applied AFTER splitting, i.e. to each allele separately
 ##   * mac defaults to 1 (drop alleles with no copies in the group); the export floor (MAC >= 40)
@@ -159,6 +159,7 @@ AWK
                 --pfile "$PFX" \
                 --keep "$K" \
                 --make-pgen multiallelics=- \
+                --output-chr chrM \
                 --threads ~{cpu} \
                 --memory ~{plink_mem_mb} \
                 --out "$TMP"
@@ -185,6 +186,7 @@ AWK
                 --mac ~{mac} \
                 ~{"--maf " + maf} \
                 --make-pgen \
+                --output-chr chrM \
                 --threads ~{cpu} \
                 --memory ~{plink_mem_mb} \
                 --out "$OUT"
