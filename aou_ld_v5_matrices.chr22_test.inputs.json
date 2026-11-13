@@ -1,0 +1,39 @@
+{
+  "aou_ld_v5_matrices.pgen_files": [
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_afr.chr22.pgen",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_amr.chr22.pgen",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_eas.chr22.pgen",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_eur_75k.chr22.pgen",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_mid.chr22.pgen",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_sas.chr22.pgen"
+  ],
+  "aou_ld_v5_matrices.pvar_files": [
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_afr.chr22.pvar",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_amr.chr22.pvar",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_eas.chr22.pvar",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_eur_75k.chr22.pvar",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_mid.chr22.pvar",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_sas.chr22.pvar"
+  ],
+  "aou_ld_v5_matrices.psam_files": [
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_afr.chr22.psam",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_amr.chr22.psam",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_eas.chr22.psam",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_eur_75k.chr22.psam",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_mid.chr22.psam",
+    "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/panels_v5/pgen/anc_sas.chr22.psam"
+  ],
+  "aou_ld_v5_matrices.plink2": "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/bin/plink2",
+  "aou_ld_v5_matrices.ldstore": "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/bin/ldstore_v2.0_x86_64",
+  "aou_ld_v5_matrices.tools": "gs://cloned-rw-migration-aou-rw-2ed13e64-wb-prompt-tamarind-2760/proj/aou_ld_panels_v9/bin/ld_tools.tgz",
+  "aou_ld_v5_matrices.tag": "mac40_r2gt0.005_d2Mb",
+  "aou_ld_v5_matrices.mac": 40,
+  "aou_ld_v5_matrices.window_bp": 4000000,
+  "aou_ld_v5_matrices.step_bp": 2000000,
+  "aou_ld_v5_matrices.max_dist_bp": 2000000,
+  "aou_ld_v5_matrices.r2_min": 0.005,
+  "aou_ld_v5_matrices.windows_per_chunk": 8,
+  "aou_ld_v5_matrices.ld_cpu": 16,
+  "aou_ld_v5_matrices.ld_memory_gb": 104,
+  "aou_ld_v5_matrices.ld_preemptible": 2
+}
