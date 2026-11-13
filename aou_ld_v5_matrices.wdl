@@ -137,20 +137,23 @@ task prep {
 
         echo "=== 3. variant table $(date -u +%FT%TZ) ==="
         # bgenix -list: alternate_ids rsid chromosome position number_of_alleles first_allele alternative_alleles
-        awk 'FNR==NR { if (FNR==1) { for (i=1;i<=NF;i++) { if ($i=="ID") d=i; if ($i=="ALT_FREQS") f=i; if ($i=="OBS_CT") o=i }; next }
+        awk 'BEGIN { k = 0 }
+             FNR==NR { if (FNR==1) { for (i=1;i<=NF;i++) { if ($i=="ID") d=i; if ($i=="ALT_FREQS") f=i; if ($i=="OBS_CT") o=i }; next }
                        af[$d] = $f "\t" $o; next }
              /^#/ || $1 == "alternate_ids" { next }
              { if (!h) { print "index\tid\tchrom\tpos\tref\talt\talt_freq\tobs_ct"; h=1 }
-               print k "\t" $2 "\t" $3 "\t" $4 "\t" $6 "\t" $7 "\t" af[$2]; k++ }' \
+               print (k+0) "\t" $2 "\t" $3 "\t" $4 "\t" $6 "\t" $7 "\t" af[$2]; k++ }' \
             "bgen/${LABEL}.mac.afreq" "bgen/${LABEL}.list" > "${LABEL}.variants.tsv"
         NVAR=$(( $(wc -l < "${LABEL}.variants.tsv") - 1 ))
-        CHR=$(awk 'NR==2{print $3}' "${LABEL}.variants.tsv")
+        CHR=$(awk -F'\t' 'NR==2{print $3}' "${LABEL}.variants.tsv")
         echo "variants (MAC >= ~{mac}): $NVAR  chrom: $CHR"
+        case "$CHR" in chr[0-9XYM]*) ;; *) echo "unexpected chromosome name '$CHR'" >&2; exit 1 ;; esac
 
         echo "=== 4. windows $(date -u +%FT%TZ) ==="
         # Each variant goes into every window [st, st+W) that contains it (st a multiple of S).
         # Windows are contiguous runs of the variant table, so first index + local index = global index.
         awk -v W=~{window_bp} -v S=~{step_bp} -v L="$LABEL" '
+            BEGIN { idx = 0 }
             /^#/ || $1 == "alternate_ids" { next }
             {
                 p = $4; k0 = int(p / S); nw = int(W / S)
@@ -183,6 +186,10 @@ task prep {
             TO=$(awk -F'\t' 'END{print $3 - 1}' "$CL")
             env LD_LIBRARY_PATH="$TL" tools/bin/bgenix -g "bgen/${LABEL}.bgen" -incl-range "${CHR}:${FROM}-${TO}" > "$D/chunk.bgen"
             env LD_LIBRARY_PATH="$TL" tools/bin/bgenix -g "$D/chunk.bgen" -index
+            GOT=$(env LD_LIBRARY_PATH="$TL" tools/bin/bgenix -g "$D/chunk.bgen" -list 2>/dev/null | awk '!/^#/ && $0 !~ /alternate_ids/' | wc -l)
+            WANT=$(awk -F'\t' -v a="$FROM" -v b="$TO" 'NR>1 && $4>=a && $4<=b' "${LABEL}.variants.tsv" | wc -l)
+            echo "chunk ${C}: ${CHR}:${FROM}-${TO}  variants in slice ${GOT} (expected ${WANT})"
+            if [ "$GOT" -ne "$WANT" ] || [ "$GOT" -lt 2 ]; then echo "slice ${C} incomplete" >&2; exit 1; fi
             cp "bgen/${LABEL}.sample" "$D/panel.sample"
             cp "$CL" "$D/windows.tsv"
             cut -f1 "$CL" | while read -r nm; do mv "z/${nm}.z" "$D/z/"; done
@@ -354,6 +361,9 @@ PYTHIN
                 w.bdose w.bcor w.ld "$N" >> master.txt
             "$TIME" -v -o w.time env LD_LIBRARY_PATH="$TL" ./ldstore --in-files master.txt --write-bcor --read-only-bgen \
                 --n-threads ~{cpu} --compression low > w.ldstore.log 2>&1 || { tail -40 w.ldstore.log >&2; exit 1; }
+            if [ ! -s w.bcor ] || grep -q '^Error' w.ldstore.log; then
+                echo "LDstore did not produce a matrix for ${NAME}:" >&2; tr '\r' '\n' < w.ldstore.log | tail -20 >&2; exit 1
+            fi
             WALL=$(awk 'index($0,"Elapsed (wall"){sub(/.*: /,""); print; exit}' w.time)
             RSS=$(awk 'index($0,"Maximum resident set size"){sub(/.*: /,""); printf "%.1f", $1/1048576; exit}' w.time)
             printf '%s\t%s\t%s\n' "$NAME" "$WALL" "$RSS" >> "${CH}.ld_stats.tsv"
@@ -449,3 +459,4 @@ PYMERGE
         File window_stats = "~{label}.~{tag}.window_stats.tsv"
     }
 }
+
