@@ -15,9 +15,10 @@ version 1.0
 ##             (left variant in the window's anchor); the dense .bcor is deleted right away
 ##   merge:    one Parquet of pairs (i, j, r) per group x chromosome
 ## r is signed, ALT-ALT positive, i/j index the variant table (0-based).
-## Resuming: reuse_windows / reuse_pairs / reuse_stats (one inner array per group x chromosome, parallel to
-## pgen_files) hand over finished 2 Mb-anchor windows from an earlier run; prep skips those anchors and
-## merge adds their pair files, so only missing windows are computed.
+## Resuming: set reuse_dir to a folder holding <label>/reuse_windows.txt, <label>/reuse_pairs.txt and
+## <label>/reuse_stats.txt for every input (label = pgen file name without .pgen; files may be empty).
+## They list finished 2 Mb-anchor windows from an earlier run; prep skips those anchors and merge adds
+## their pair files, so only missing windows are computed.
 ## Requires window_bp = step_bp + max_dist_bp (default anchor 2 Mb + 2 Mb reach = 4 Mb windows).
 
 workflow aou_ld_v5_matrices {
@@ -28,9 +29,7 @@ workflow aou_ld_v5_matrices {
         Array[File] psam_files
 
         # optional, for resuming a partly finished run (see header)
-        Array[Array[String]]? reuse_windows
-        Array[Array[File]]?   reuse_pairs
-        Array[Array[File]]?   reuse_stats
+        String? reuse_dir
 
         File plink2
         File ldstore        # ldstore_v2.0_x86_64
@@ -54,15 +53,25 @@ workflow aou_ld_v5_matrices {
         Int prep_disk_pad_gb     = 50
 
         Int ld_cpu          = 16
-        Int ld_memory_gb    = 64     # peak was 75 GB at 66k variants; ~45 GB expected at 50k
+        Int ld_memory_gb    = 80     # peak was 75 GB at 66k variants (AFR/AMR); memory grows with variants x samples
         Int ld_disk_pad_gb  = 60
         Int ld_preemptible  = 2   # tries on spot VMs, then on-demand
     }
 
     scatter (i in range(length(pgen_files))) {
-        Array[String] rw = if defined(reuse_windows) then select_first([reuse_windows])[i] else []
-        Array[File]   rp = if defined(reuse_pairs)   then select_first([reuse_pairs])[i]   else []
-        Array[File]   rs = if defined(reuse_stats)   then select_first([reuse_stats])[i]   else []
+        String label_i = basename(pgen_files[i], ".pgen")
+        if (defined(reuse_dir)) {
+            String rd = sub(select_first([reuse_dir]), "/+$", "") + "/" + label_i
+            File rw_file = rd + "/reuse_windows.txt"
+            File rp_file = rd + "/reuse_pairs.txt"
+            File rs_file = rd + "/reuse_stats.txt"
+            Array[String] rw_list = read_lines(rw_file)
+            Array[File]   rp_list = read_lines(rp_file)
+            Array[File]   rs_list = read_lines(rs_file)
+        }
+        Array[String] rw = if defined(reuse_dir) then select_first([rw_list]) else []
+        Array[File]   rp = if defined(reuse_dir) then select_first([rp_list]) else []
+        Array[File]   rs = if defined(reuse_dir) then select_first([rs_list]) else []
 
         call prep {
             input:
