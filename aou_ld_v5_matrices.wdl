@@ -9,16 +9,22 @@ version 1.0
 ##                window would hold more than max_window_variants are halved (down to min_anchor_bp),
 ##                because LDstore2 crashed on windows of ~64k+ variants. Anchors tile the chromosome,
 ##                so every pair within 2 Mb is still stored exactly once.
+##                If even a min_anchor_bp anchor + its 2 Mb reach is too big (very dense regions), the reach is
+##                split into pieces: piece 0 is the anchor + the start of the reach, pieces 1..K-1 are the anchor's
+##                variants + the next part of the reach, and only anchor x reach pairs are kept from those.
+##                Pieces are named <label>.<a>_<b+2Mb>.r<k>of<K>.
 ##             -> chunks of windows (each with its own BGEN slice)
 ##   ld_chunk: for each window, LDstore2 (--write-bcor --read-only-bgen --compression low, as in v3),
 ##             then keep pairs with r^2 > 0.005 and distance <= 2 Mb, storing each pair once
 ##             (left variant in the window's anchor); the dense .bcor is deleted right away
-##   merge:    one Parquet of pairs (i, j, r) per group x chromosome
+##             A window where LDstore2 still fails twice is listed in <chunk>.failed.tsv; the task goes on.
+##   merge:    one Parquet of pairs (i, j, r) per group x chromosome, plus <label>.<tag>.missing_windows.txt
+##             (empty when complete). If any window is missing the Parquet is named ...INCOMPLETE.pairs.parquet.
 ## r is signed, ALT-ALT positive, i/j index the variant table (0-based).
 ## Resuming: set reuse_dir to a folder holding <label>/reuse_windows.txt, <label>/reuse_pairs.txt and
 ## <label>/reuse_stats.txt for every input (label = pgen file name without .pgen; files may be empty).
-## They list finished 2 Mb-anchor windows from an earlier run; prep skips those anchors and merge adds
-## their pair files, so only missing windows are computed.
+## They list finished windows from earlier runs (window <label>.<a>_<e> covers the anchor [a, e - 2 Mb));
+## prep skips those anchors and merge adds their pair files, so only missing windows are computed.
 ## Requires window_bp = step_bp + max_dist_bp (default anchor 2 Mb + 2 Mb reach = 4 Mb windows).
 
 workflow aou_ld_v5_matrices {
@@ -98,7 +104,8 @@ workflow aou_ld_v5_matrices {
         call merge {
             input:
                 parts = flatten(ld_chunk.pairs), thin_stats = ld_chunk.thin_stats, ld_stats = ld_chunk.ld_stats,
-                reused_parts = rp, reused_stats = rs,
+                reused_parts = rp, reused_stats = rs, new_windows = prep.windows_tsv,
+                ld_failed = ld_chunk.failed,
                 label = prep.label, tag = tag, tools = tools, docker = docker
         }
     }
@@ -106,6 +113,7 @@ workflow aou_ld_v5_matrices {
     output {
         Array[File]        pairs        = merge.pairs
         Array[File]        window_stats = merge.window_stats
+        Array[File]        missing      = merge.missing
         Array[File]        variants     = prep.variants
         Array[Array[File]] prep_logs    = prep.logs
     }
@@ -187,8 +195,8 @@ Anchor segments [a, b) tile [0, last position]; each anchor gets the window [a, 
 every pair whose left variant is in [a, b) and whose distance is <= D. An anchor is halved while its
 window would hold more than nmax variants (down to min_anchor bp). Writes z/<window>.z (LDstore2 input)
 for windows with >= 2 variants and windows.all.tsv:
-name, start, end, first index, n variants, first id, anchor length."""
-import os, sys
+name, start, end, first index, n variants, first id, anchor length, anchor n (reach pieces 1..), reach first index."""
+import os, re, sys
 import numpy as np
 var, label, S, D, nmax, amin = sys.argv[1], sys.argv[2], *map(int, sys.argv[3:7])
 reuse = set(l.strip() for l in open(sys.argv[7]) if l.strip()) if len(sys.argv) > 7 else set()
@@ -207,40 +215,97 @@ if np.any(np.diff(pos) < 0):
 def n_in(a, e):
     return int(np.searchsorted(pos, e, "left") - np.searchsorted(pos, a, "left"))
 
-anchors = []
+anchors = []          # (a, b, split) ; split = True -> reach is cut into pieces
 def add(a, b):
-    if n_in(a, b + D) > nmax and (b - a) // 2 >= amin:
-        m = a + (b - a) // 2
-        add(a, m); add(m, b)
+    if n_in(a, b + D) > nmax:
+        if (b - a) // 2 >= amin:
+            m = a + (b - a) // 2
+            add(a, m); add(m, b)
+            return
+        anchors.append((a, b, True))
     else:
-        anchors.append((a, b))
-n_reused = 0
+        anchors.append((a, b, False))
+
+# reused windows -> anchors [a, e - D) (names <label>.<a>_<e> or <label>.<a>_<e>.r<k>of<K>)
+pat = re.compile(r"^" + re.escape(label) + r"\.(\d+)_(\d+)(?:\.r(\d+)of(\d+))?$")
+done, pieces = set(), {}
+for nm in reuse:
+    m = pat.match(nm)
+    if not m:
+        sys.exit(f"reuse name does not match this chromosome: {nm}")
+    a0, e0 = int(m.group(1)), int(m.group(2))
+    if m.group(3) is None:
+        done.add((a0, e0 - D))
+    else:
+        pieces.setdefault((a0, e0 - D, int(m.group(4))), set()).add(int(m.group(3)))
+for (a0, b0, K), got in pieces.items():
+    if got != set(range(K)):
+        sys.exit(f"reused anchor {a0}_{b0} has pieces {sorted(got)} of {K}")
+    done.add((a0, b0))
+done = sorted(done)
+for (a1, b1), (a2, b2) in zip(done, done[1:]):
+    if a2 < b1:
+        sys.exit(f"reused anchors overlap: {a1}_{b1} and {a2}_{b2}")
+
+n_reused_bp = 0
 for k in range(int(pos[-1]) // S + 1):
-    if f"{label}.{k * S}_{(k + 1) * S + D}" in reuse:   # finished in an earlier run
-        n_reused += 1
-        continue
-    add(k * S, (k + 1) * S)
+    lo_k, hi_k = k * S, (k + 1) * S
+    cur = lo_k
+    for a0, b0 in done:                      # subtract reused anchors inside this 2 Mb segment
+        if b0 <= lo_k or a0 >= hi_k:
+            continue
+        if a0 < lo_k or b0 > hi_k:
+            sys.exit(f"reused anchor {a0}_{b0} crosses a {S} bp boundary")
+        if a0 > cur:
+            add(cur, a0)
+        n_reused_bp += b0 - a0
+        cur = b0
+    if cur < hi_k:
+        add(cur, hi_k)
 
 os.makedirs("z", exist_ok=True)
-n_short = n_big = 0
+n_short = n_big = n_split = n_pieces = 0
+def write_window(out, nm, st, en, idx, step, na="-", pf="-"):
+    """idx: sorted global row indices in the window (anchor rows first)."""
+    n = len(idx)
+    out.write(f"{nm}\t{st}\t{en}\t{idx[0] if n else -1}\t{n}\t{rows[idx[0]][0] if n else '.'}\t{step}\t{na}\t{pf}\n")
+    if n >= 2:
+        with open(f"z/{nm}.z", "w") as z:
+            z.write("rsid chromosome position allele1 allele2\n")
+            for i in idx:
+                r = rows[i]
+                z.write(f"{r[0]} {r[1]} {r[2]} {r[3]} {r[4]}\n")
+
 with open("windows.all.tsv", "w") as out:
-    for a, b in anchors:
+    for a, b, split in anchors:
         e = b + D
-        lo, hi = int(np.searchsorted(pos, a, "left")), int(np.searchsorted(pos, e, "left"))
-        n = hi - lo
+        lo = int(np.searchsorted(pos, a, "left")); m = int(np.searchsorted(pos, b, "left"))
+        hi = int(np.searchsorted(pos, e, "left"))
         n_short += (b - a) < S
-        n_big += n > nmax
-        nm = f"{label}.{a}_{e}"
-        out.write(f"{nm}\t{a}\t{e}\t{lo}\t{n}\t{rows[lo][0] if n else '.'}\t{b - a}\n")
-        if n >= 2:
-            with open(f"z/{nm}.z", "w") as z:
-                z.write("rsid chromosome position allele1 allele2\n")
-                for r in rows[lo:hi]:
-                    z.write(f"{r[0]} {r[1]} {r[2]} {r[3]} {r[4]}\n")
-print(f"reused from earlier run: {n_reused} (of {len(reuse)} given)  anchors to compute: {len(anchors)}  "
-      f"shorter than {S} bp: {n_short}  still above {nmax} variants: {n_big}")
-if n_reused != len(reuse):
-    sys.exit("some reuse_windows names do not match this chromosome's 2 Mb anchors")
+        if m == lo:          # no variant in the anchor -> no pairs to store
+            continue
+        if not split or hi - m == 0:
+            n_big += (hi - lo) > nmax
+            write_window(out, f"{label}.{a}_{e}", a, e, list(range(lo, hi)), b - a)
+            continue
+        na = m - lo
+        budget = nmax - na
+        if budget < 1000:
+            sys.exit(f"anchor {a}_{b} alone has {na} variants; lower min_anchor_bp")
+        cuts = list(range(m, hi, budget)) + [hi]          # reach rows [cuts[k], cuts[k+1])
+        K = len(cuts) - 1
+        n_split += 1; n_pieces += K
+        for k in range(K):
+            s0, s1 = cuts[k], cuts[k + 1]
+            en = int(pos[s1 - 1]) + 1
+            nm = f"{label}.{a}_{e}.r{k}of{K}"
+            if k == 0:   # contiguous: anchor + first part of the reach (normal thinning)
+                write_window(out, nm, a, en, list(range(lo, s1)), b - a)
+            else:        # anchor rows + this part of the reach; keep only anchor x reach pairs
+                write_window(out, nm, a, en, list(range(lo, m)) + list(range(s0, s1)), b - a, na, s0)
+print(f"reused from earlier runs: {len(done)} anchors ({n_reused_bp / 1e6:.1f} Mb) from {len(reuse)} windows  "
+      f"anchors to compute: {len(anchors)}  shorter than {S} bp: {n_short}  above {nmax} variants: {n_big}  "
+      f"split into reach pieces: {n_split} anchors -> {n_pieces} windows")
 PYWIN
         tools/bin/python3 make_windows.py "${LABEL}.variants.tsv" "$LABEL" ~{step_bp} ~{max_dist_bp} \
             ~{max_window_variants} ~{min_anchor_bp} "~{write_lines(reuse_windows)}"
@@ -252,14 +317,14 @@ PYWIN
 
         echo "=== 5. chunks $(date -u +%FT%TZ) ==="
         # chunks = runs of <= windows_per_chunk adjacent windows (gaps left by reused windows start a new chunk)
-        awk -F'\t' -v m=~{windows_per_chunk} '{ if (NR == 1 || k == m || $2 != nxt) { c++; k = 0; if (f) close(f); f = sprintf("chunklist.%04d", c - 1) }
-                                               print > f; k++; nxt = $2 + $7 }' windows.tsv
+        awk -F'\t' -v m=~{windows_per_chunk} '{ if (NR == 1 || k == m || ($2 != nxt && $2 != pst)) { c++; k = 0; if (f) close(f); f = sprintf("chunklist.%04d", c - 1) }
+                                               print > f; k++; nxt = $2 + $7; pst = $2 }' windows.tsv
         for CL in chunklist.*; do
             [ -e "$CL" ] || continue
             C="${CL#chunklist.}"
             D="c_${C}"; mkdir -p "$D/z"
             FROM=$(awk -F'\t' 'NR==1{print ($2 < 1 ? 1 : $2)}' "$CL")
-            TO=$(awk -F'\t' 'END{print $3 - 1}' "$CL")
+            TO=$(awk -F'\t' '$3 > mx {mx = $3} END{print mx - 1}' "$CL")
             env LD_LIBRARY_PATH="$TL" tools/bin/bgenix -g "bgen/${LABEL}.bgen" -incl-range "${CHR}:${FROM}-${TO}" > "$D/chunk.bgen"
             env LD_LIBRARY_PATH="$TL" tools/bin/bgenix -g "$D/chunk.bgen" -index
             GOT=$(env LD_LIBRARY_PATH="$TL" tools/bin/bgenix -g "$D/chunk.bgen" -list 2>/dev/null | awk '!/^#/ && $0 !~ /alternate_ids/' | wc -l)
@@ -292,6 +357,7 @@ PYWIN
         File        variants = glob("*.variants.tsv.gz")[0]
         Array[File] chunks   = glob("chunks/*.tar")
         Array[File] logs     = glob("logs/*")
+        File        windows_tsv = "logs/~{basename(pgen, ".pgen")}.windows.tsv"
     }
 }
 
@@ -360,7 +426,7 @@ def read_header(fn):
     return n_samples, n, comp, offset, ids, pos
 
 
-def thin(fn, start, step, max_dist, r2_min, first_index):
+def thin(fn, start, step, max_dist, r2_min, first_index, anchor_n=-1, reach_first=-1):
     n_samples, n, comp, offset, ids, pos = read_header(fn)
     nb = NBYTES[comp]
     na = DTYPE[nb](INT_NA[nb])
@@ -371,13 +437,18 @@ def thin(fn, start, step, max_dist, r2_min, first_index):
     lo = np.searchsorted(pos, start, "left")
     hi = np.searchsorted(pos, start + step, "left")
     ymax = np.searchsorted(pos, pos + max_dist, "right")
+    cross = anchor_n >= 0
+    if cross:   # reach piece: rows [0, anchor_n) are the anchor, rows [anchor_n, n) the reach part
+        if hi != anchor_n or lo != 0:
+            sys.exit(f"anchor rows {lo}-{hi} do not match anchor_n {anchor_n}")
     I, J, R = [], [], []
     n_checked = 0
     for x in range(lo, hi):
-        m = int(ymax[x]) - x - 1
+        y0 = anchor_n if cross else x + 1        # first partner row
+        m = int(ymax[x]) - y0
         if m <= 0:
             continue
-        base = npairs - (n - x) * (n - x - 1) // 2
+        base = npairs - (n - x) * (n - x - 1) // 2 + (y0 - x - 1)
         seg = np.asarray(mm[base:base + m])
         r = seg.astype(np.float64) * scale - 1.0
         keep = (seg != na) & (r * r > r2_min)
@@ -385,7 +456,10 @@ def thin(fn, start, step, max_dist, r2_min, first_index):
         n_checked += m
         if js.size:
             I.append(np.full(js.size, first_index + x, dtype=np.uint32))
-            J.append((first_index + x + 1 + js).astype(np.uint32))
+            if cross:
+                J.append((reach_first + (y0 - anchor_n) + js).astype(np.uint32))
+            else:
+                J.append((first_index + y0 + js).astype(np.uint32))
             R.append(r[js].astype(np.float32))
     cat = lambda L, dt: np.concatenate(L) if L else np.empty(0, dtype=dt)
     return dict(n_samples=n_samples, n=n, ids=ids, pos=pos, n_checked=n_checked,
@@ -400,6 +474,8 @@ def main():
     ap.add_argument("--max-dist", type=int, required=True)
     ap.add_argument("--r2", type=float, required=True)
     ap.add_argument("--first-index", type=int, required=True)
+    ap.add_argument("--anchor-n", type=int, default=-1)
+    ap.add_argument("--reach-first", type=int, default=-1)
     ap.add_argument("--expect-first-id", default="")
     ap.add_argument("--expect-n", type=int, default=-1)
     ap.add_argument("--out", required=True)
@@ -408,7 +484,7 @@ def main():
     a = ap.parse_args()
 
     t0 = time.time()
-    res = thin(a.bcor, a.start, a.step, a.max_dist, a.r2, a.first_index)
+    res = thin(a.bcor, a.start, a.step, a.max_dist, a.r2, a.first_index, a.anchor_n, a.reach_first)
     if a.expect_n >= 0 and res["n"] != a.expect_n:
         sys.exit(f"{a.name}: bcor has {res['n']} variants, expected {a.expect_n}")
     if a.expect_first_id and res["n"] and res["ids"][0] != a.expect_first_id:
@@ -427,35 +503,41 @@ PYTHIN
 
         : > "${CH}.thin_stats.tsv"
         : > "${CH}.ld_stats.tsv"
+        : > "${CH}.failed.tsv"
         N=$(awk 'NR > 2' work/panel.sample | wc -l)
 
-        while IFS=$'\t' read -r NAME ST EN FIRST NV FID STEP; do
+        while IFS=$'\t' read -r NAME ST EN FIRST NV FID STEP NA PF; do
             echo "--- ${NAME} (${NV} variants) $(date -u +%FT%TZ)"
             printf 'z;bgen;bgi;sample;bdose;bcor;ld;n_samples\n' > master.txt
             printf '%s;%s;%s;%s;%s;%s;%s;%s\n' "work/z/${NAME}.z" work/chunk.bgen work/chunk.bgen.bgi work/panel.sample \
                 w.bdose w.bcor w.ld "$N" >> master.txt
+            OK=0
             for TRY in 1 2; do
                 rm -f w.bcor w.bdose w.ld
                 if "$TIME" -v -o w.time env LD_LIBRARY_PATH="$TL" ./ldstore --in-files master.txt --write-bcor --read-only-bgen \
-                       --n-threads ~{cpu} --compression low > w.ldstore.log 2>&1; then break; fi
-                echo "LDstore exited non-zero on ${NAME} (try ${TRY}):" >&2; tr '\r' '\n' < w.ldstore.log | tail -5 >&2
-                if [ "$TRY" -eq 2 ]; then exit 1; fi
+                       --n-threads ~{cpu} --compression low > w.ldstore.log 2>&1 \
+                   && [ -s w.bcor ] && ! grep -q '^Error' w.ldstore.log; then OK=1; break; fi
+                echo "LDstore failed on ${NAME} (try ${TRY}):" >&2; tr '\r' '\n' < w.ldstore.log | tail -5 >&2
             done
-            if [ ! -s w.bcor ] || grep -q '^Error' w.ldstore.log; then
-                echo "LDstore did not produce a matrix for ${NAME}:" >&2; tr '\r' '\n' < w.ldstore.log | tail -20 >&2; exit 1
+            if [ "$OK" -ne 1 ]; then
+                printf '%s\t%s\tLDstore failed twice\n' "$NAME" "$NV" >> "${CH}.failed.tsv"
+                rm -f w.bcor w.bdose w.ld
+                continue
             fi
             WALL=$(awk 'index($0,"Elapsed (wall"){sub(/.*: /,""); print; exit}' w.time)
             RSS=$(awk 'index($0,"Maximum resident set size"){sub(/.*: /,""); printf "%.1f", $1/1048576; exit}' w.time)
             printf '%s\t%s\t%s\n' "$NAME" "$WALL" "$RSS" >> "${CH}.ld_stats.tsv"
 
+            XARGS=""; if [ -n "${NA:-}" ] && [ "$NA" != "-" ]; then XARGS="--anchor-n $NA --reach-first $PF"; fi
             "$PY" thin_bcor.py --bcor w.bcor --start "$ST" --step "$STEP" --max-dist ~{max_dist_bp} \
-                --r2 ~{r2_min} --first-index "$FIRST" --expect-first-id "$FID" --expect-n "$NV" \
+                --r2 ~{r2_min} --first-index "$FIRST" --expect-first-id "$FID" --expect-n "$NV" $XARGS \
                 --out "pairs/${NAME}.pairs.parquet" --stats "${CH}.thin_stats.tsv" --name "$NAME"
             rm -f w.bcor w.bdose w.ld
         done < work/windows.tsv
 
         echo "=== ld stats (window, wall, max RSS GB) ==="; cat "${CH}.ld_stats.tsv"
         echo "=== thin stats (window, n, pairs checked, pairs kept, seconds) ==="; cat "${CH}.thin_stats.tsv"
+        echo "=== failed windows ==="; cat "${CH}.failed.tsv"
         echo "end: $(date -u +%FT%TZ)"
     >>>
 
@@ -471,6 +553,7 @@ PYTHIN
         Array[File] pairs      = glob("pairs/*.parquet")
         File        thin_stats = glob("*.thin_stats.tsv")[0]
         File        ld_stats   = glob("*.ld_stats.tsv")[0]
+        File        failed     = glob("*.failed.tsv")[0]
     }
 }
 
@@ -481,6 +564,8 @@ task merge {
         Array[File] ld_stats
         Array[File] reused_parts
         Array[File] reused_stats
+        File        new_windows      # prep's windows.tsv: windows this run should have computed
+        Array[File] ld_failed
         String label
         String tag
         File tools
@@ -495,20 +580,29 @@ task merge {
         tar -xzf "~{tools}" -C tools
         cat > merge_pairs.py <<'PYMERGE'
 #!/usr/bin/env python3
-"""Concatenate per-window pair files (sorted by window start) into one Parquet per group x chromosome."""
-import sys, re
-import pyarrow.parquet as pq
+"""Concatenate per-window pair files into one Parquet per group x chromosome, ordered by anchor start.
+Reach pieces of one anchor (<a>_<e>.r<k>of<K>) are combined and sorted by (i, j)."""
+import sys, re, itertools
+import pyarrow as pa, pyarrow.parquet as pq
 
 out, listfile = sys.argv[1], sys.argv[2]
 parts = [l.strip() for l in open(listfile) if l.strip()]
-key = lambda p: int(re.search(r"\.(\d+)_\d+\.pairs\.parquet$", p).group(1))
+rx = re.compile(r"\.(\d+)_\d+(?:\.r(\d+)of\d+)?\.pairs\.parquet$")
+def key(p):
+    m = rx.search(p)
+    if not m:
+        sys.exit(f"unexpected pair file name: {p}")
+    return (int(m.group(1)), int(m.group(2) or 0))
 parts = sorted(parts, key=key)
 names = [re.sub(r".*/", "", p) for p in parts]
 if len(set(names)) != len(names):
     sys.exit("duplicate window files")
 writer, n = None, 0
-for p in parts:
-    t = pq.read_table(p)
+for st, grp in itertools.groupby(parts, key=lambda p: key(p)[0]):
+    grp = list(grp)
+    t = pa.concat_tables([pq.read_table(p) for p in grp])
+    if len(grp) > 1:
+        t = t.sort_by([("i", "ascending"), ("j", "ascending")])
     if writer is None:
         writer = pq.ParquetWriter(out, t.schema, compression="zstd")
     if t.num_rows:
@@ -521,11 +615,22 @@ print(f"{out}\t{len(parts)} windows\t{n} pairs")
 PYMERGE
         cat "~{write_lines(parts)}" "~{write_lines(reused_parts)}" > parts.txt
         echo "pair files: $(wc -l < parts.txt) (new $(wc -l < "~{write_lines(parts)}"), reused $(wc -l < "~{write_lines(reused_parts)}"))"
-        tools/bin/python3 merge_pairs.py "~{label}.~{tag}.pairs.parquet" parts.txt
+        # windows expected = this run's windows + reused ones; anything not merged is listed as missing
+        export LC_ALL=C
+        { cut -f1 "~{new_windows}"; sed 's#.*/##; s#\.pairs\.parquet$##' "~{write_lines(reused_parts)}"; } | sort -u > expected_windows.txt
+        sed 's#.*/##; s#\.pairs\.parquet$##' parts.txt | sort -u | comm -23 expected_windows.txt - > "~{label}.~{tag}.missing_windows.txt"
+        xargs -r cat < "~{write_lines(ld_failed)}" > ld_failed.tsv
+        NMISS=$(wc -l < "~{label}.~{tag}.missing_windows.txt")
+        echo "windows expected: $(wc -l < expected_windows.txt)  missing: $NMISS  (LDstore failures: $(wc -l < ld_failed.tsv))"
+        if [ "$NMISS" -gt 0 ]; then
+            OUT="~{label}.~{tag}.INCOMPLETE.pairs.parquet"; head -20 "~{label}.~{tag}.missing_windows.txt"
+        else
+            OUT="~{label}.~{tag}.pairs.parquet"
+        fi
+        tools/bin/python3 merge_pairs.py "$OUT" parts.txt
 
         # window, n_variants, pairs_checked, pairs_kept, thin_s, ldstore_wall, ldstore_max_rss_gb
         # (stats files from an earlier run can list windows that are not reused; keep only merged windows)
-        export LC_ALL=C
         sed 's#.*/##; s#\.pairs\.parquet$##' parts.txt | sort -u > merged_windows.txt
         { cat "~{write_lines(thin_stats)}"; grep '\.thin_stats\.tsv$' "~{write_lines(reused_stats)}" || true; } | xargs -r cat \
             | sort -t$'\t' -k1,1 -u | join -t$'\t' - merged_windows.txt > thin.tsv
@@ -538,7 +643,7 @@ PYMERGE
         if [ "$NS" -ne "$NM" ]; then echo "stats missing for some windows:" >&2; cut -f1 thin.tsv | comm -13 - merged_windows.txt | head >&2; fi
         awk -F'\t' 'NR>1{n++; c+=$3; k+=$4} END{printf "windows=%d pairs_checked=%d pairs_kept=%d (%.3f%%)\n", n, c, k, (c?100*k/c:0)}' \
             "~{label}.~{tag}.window_stats.tsv"
-        ls -l "~{label}.~{tag}.pairs.parquet"
+        ls -l ./*.pairs.parquet
     >>>
 
     runtime {
@@ -550,7 +655,8 @@ PYMERGE
     }
 
     output {
-        File pairs        = "~{label}.~{tag}.pairs.parquet"
+        File pairs        = glob("*.pairs.parquet")[0]
         File window_stats = "~{label}.~{tag}.window_stats.tsv"
+        File missing      = "~{label}.~{tag}.missing_windows.txt"
     }
 }
