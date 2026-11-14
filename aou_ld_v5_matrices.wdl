@@ -21,7 +21,7 @@ version 1.0
 ##   merge:    one Parquet of pairs (i, j, r) per group x chromosome, plus <label>.<tag>.missing_windows.txt
 ##             (empty when complete). If any window is missing the Parquet is named ...INCOMPLETE.pairs.parquet.
 ## r is signed, ALT-ALT positive, i/j index the variant table (0-based).
-## Resuming: set reuse_dir to a folder holding <label>/reuse_windows.txt, <label>/reuse_pairs.txt and
+## Resuming: reuse_dir is required (use "none" for a fresh run). Set it to a folder holding <label>/reuse_windows.txt, <label>/reuse_pairs.txt and
 ## <label>/reuse_stats.txt for every input (label = pgen file name without .pgen; files may be empty).
 ## They list finished windows from earlier runs (window <label>.<a>_<e> covers the anchor [a, e - 2 Mb));
 ## prep skips those anchors and merge adds their pair files, so only missing windows are computed.
@@ -34,8 +34,8 @@ workflow aou_ld_v5_matrices {
         Array[File] pvar_files
         Array[File] psam_files
 
-        # optional, for resuming a partly finished run (see header)
-        String? reuse_dir
+        # resuming a partly finished run (see header): folder with <label>/reuse_*.txt, or "none" for a fresh run
+        String reuse_dir
 
         File plink2
         File ldstore        # ldstore_v2.0_x86_64
@@ -66,8 +66,9 @@ workflow aou_ld_v5_matrices {
 
     scatter (i in range(length(pgen_files))) {
         String label_i = basename(pgen_files[i], ".pgen")
-        if (defined(reuse_dir)) {
-            String rd = sub(select_first([reuse_dir]), "/+$", "") + "/" + label_i
+        Boolean do_reuse = reuse_dir != "none" && reuse_dir != ""
+        if (do_reuse) {
+            String rd = sub(reuse_dir, "/+$", "") + "/" + label_i
             File rw_file = rd + "/reuse_windows.txt"
             File rp_file = rd + "/reuse_pairs.txt"
             File rs_file = rd + "/reuse_stats.txt"
@@ -75,9 +76,9 @@ workflow aou_ld_v5_matrices {
             Array[File]   rp_list = read_lines(rp_file)
             Array[File]   rs_list = read_lines(rs_file)
         }
-        Array[String] rw = if defined(reuse_dir) then select_first([rw_list]) else []
-        Array[File]   rp = if defined(reuse_dir) then select_first([rp_list]) else []
-        Array[File]   rs = if defined(reuse_dir) then select_first([rs_list]) else []
+        Array[String] rw = if do_reuse then select_first([rw_list]) else []
+        Array[File]   rp = if do_reuse then select_first([rp_list]) else []
+        Array[File]   rs = if do_reuse then select_first([rs_list]) else []
 
         call prep {
             input:
